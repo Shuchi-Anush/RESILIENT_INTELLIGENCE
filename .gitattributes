@@ -1,0 +1,49 @@
+# =========================================================
+# RESILIENT INTELLIGENCE (RI) - root .gitattributes
+# Scope: applies to the RI repository root and any RI-original
+# files outside graphify/.
+#
+# NOTE: graphify/ retains its own .gitattributes from the upstream
+# Graphify project. This file does not override or replace it.
+# =========================================================
+
+# Default: normalize text files to LF in the repository, let Git
+# decide checkout behavior based on the platform/config (core.autocrlf).
+* text=auto eol=lf
+
+# ---- Explicit text formats ----
+*.md    text eol=lf
+*.py    text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+*.txt   text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+
+# ---- Preserved upstream snapshot: whitespace hygiene exemption ----
+# graphify/ is a preserved, provenance-oriented snapshot of upstream
+# Graphify v8, retained byte/content-faithful for research and baseline
+# comparison (see THIRD_PARTY_NOTICES.md). Its original whitespace
+# (including any trailing whitespace in its source, docs, or fixtures)
+# is intentionally left as-is and must not be "cleaned" to satisfy RI's
+# own hygiene checks. Unsetting the `whitespace` attribute here means
+# `git diff --check` / `git apply --whitespace` will not flag this path
+# as an error. This does not change file contents, line-ending handling,
+# or any other attribute for this path — it only silences whitespace
+# error reporting for it. RI-authored files elsewhere are unaffected and
+# continue to receive normal whitespace diagnostics.
+graphify/** -whitespace
+
+# ---- Binary assets (do not normalize line endings) ----
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.svg  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.db   binary
+*.sqlite3 binary

@@ -1,0 +1,85 @@
+# =========================================================
+# RESILIENT INTELLIGENCE (RI) - root .gitignore
+# Scope: applies to the RI repository root and any RI-original
+# code/tooling added outside graphify/.
+#
+# NOTE: graphify/ retains its own .gitignore from the upstream
+# Graphify project. This file does not override or replace it.
+# =========================================================
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- Environment / secrets ----
+.env
+.env.*
+*.env.local
+*.secret
+
+# ---- IDE / editor temp files ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- OS metadata ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Test / coverage / cache artifacts ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---- Build / dist artifacts ----
+build/
+dist/
+*.egg-info/
+*.egg
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Local temporary files ----
+*.tmp
+*.bak
+tmp/
+temp/
+
+# ---- Generated Graphify output (RI-side usage) ----
+graphify-out/
+
+# ---- Model / cache artifacts ----
+.cache/
+*.cache
+model_cache/
+
+# ---- Large local runtime artifacts ----
+# NOTE: intentionally NOT blanket-ignoring *.sqlite3 / *.db. RI may need to
+# version small, deterministic SQLite fixtures/databases used for tests or
+# evaluation. Only clearly transient/runtime database artifacts are
+# ignored below; anything under a fixtures/ directory is explicitly kept.
+*.db-journal
+*.sqlite3-journal
+*-wal
+*-shm
+!**/fixtures/**
+*.zip
+!archives/*.zip
