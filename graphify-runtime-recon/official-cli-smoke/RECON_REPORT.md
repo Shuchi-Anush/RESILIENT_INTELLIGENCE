@@ -1,0 +1,273 @@
+# Graphify Official CLI 0.9.86 — Smoke Reconnaissance
+
+Experiment ID: GRAPHIFY-RECON-004
+Date: 2026-10-12
+Scope: Bounded read-only investigation of the officially installed Graphify CLI.
+
+---
+
+## 1. Objective
+
+Establish how the **officially installed** Graphify CLI (`0.9.86`) behaves in
+practice — extraction, node/edge schema, query/path/explain/affected operations,
+and exports — before deciding what RI should reuse or implement independently.
+
+This is a **smoke recon**: it tests actual CLI behavior on a small synthetic
+corpus, not a benchmark. It intentionally does not exercise LLM semantic
+extraction (no API keys / Ollama started per scope boundary).
+
+## 2. Environment
+
+| Item | Value |
+|---|---|
+| CLI binary | [`C:\Users\Shuchi\.local\bin\graphify.exe`](file:///C:/Users/Shuchi/.local/bin/graphify.exe) |
+| Version | `graphify 0.9.86` |
+| Cache schema version | `v0.9.86-s8-g0fcafffe3c00` (seen in `cache/ast/` dir name) |
+| OS / shell | Windows 11 / PowerShell 7 |
+| LLM backends | No API keys set; Ollama not started (per scope). All runs use code-only / no-LLM paths. |
+| Workspace | [`official-cli-smoke/`](file:///D:/RESILIENT_INTELLIGENCE/graphify-runtime-recon/official-cli-smoke) |
+| Corpus | [`corpus/`](file:///D:/RESILIENT_INTELLIGENCE/graphify-runtime-recon/official-cli-smoke/corpus): `warehouse.py`, `design.md`, `notes.md` |
+
+## 3. Commands Executed
+
+All commands use `$gf = C:\Users\Shuchi\.local\bin\graphify.exe` and
+`$graph = ...\corpus\graphify-out\graph.json` unless noted.
+
+### 3.1 Version & help
+
+```
+graphify --version     → graphify 0.9.86        (exit 0)
+graphify --help        → full command list      (exit 0)
+```
+
+### 3.2 Extraction
+
+**Code-only extract** (skips docs, no LLM):
+```
+graphify extract .\corpus --code-only --no-cluster --out .\official-cli-smoke
+```
+- Exit 0, 4729 ms
+- Output: `14 nodes, 15 edges` at
+  [graphify-out/graph.json](file:///D:/RESILIENT_INTELLIGENCE/graphify-runtime-recon/official-cli-smoke/graphify-out/graph.json)
+
+**Update** (no LLM, but ingests docs as structural AST):
+```
+graphify update .\corpus --force --no-cluster
+```
+- Exit 0, 1249 ms
+- Output: `20 nodes, 25 edges` at
+  [corpus/graphify-out/graph.json](file:///D:/RESILIENT_INTELLIGENCE/graphify-runtime-recon/official-cli-smoke/corpus/graphify-out/graph.json)
+  (update writes to a sibling of the corpus path, not to `--out`)
+
+### 3.3 Query / path / explain / affected
+
+| Command | Result | Exit |
+|---|---|---|
+| `explain '.reserve()' --graph $graph` | node info + 3 connections listed | 0 |
+| `explain 'InventoryService' --all --graph $graph` | all 5 connections listed | 0 |
+| `explain 'DoesNotExist' --graph $graph` | `No node matching 'DoesNotExist' found.` | **4** |
+| `path '.reserve()' 'Warehouse.decrement' --graph $graph` | `No directed path found… Re-run with --undirected` | 0 |
+| `path '.reserve()' 'Warehouse.decrement' --undirected --graph $graph` | 3-hop path via doc nodes | 0 |
+| `path '.reserve()' 'NoSuchNode' --graph $graph` | `No node matching 'NoSuchNode' found.` | **4** |
+| `path 'Inventory Flow' 'record_event()' --graph $graph` | 3-hop path | 0 |
+| `query "what calls check_stock" --graph $graph` | BFS, 4 nodes, edge shown | 0 |
+| `query "reserve" --context call --graph $graph` | 2 nodes, `--context` filter active | 0 |
+| `affected '.check_stock()' --graph $graph` | 2 affected (reserve via calls, Inventory Flow via references) | 0 |
+| `affected '.check_stock()' --relation calls --depth 3 --graph $graph` | 1 affected (reserve only) | 0 |
+| `affected 'Warehouse' --depth 3 --graph $graph` | 3 affected (init, Inventory Flow, Open Questions) | 0 |
+
+### 3.4 Analysis / export / maintenance
+
+| Command | Result | Exit |
+|---|---|---|
+| `god-nodes --graph $graph` | top-10 most connected nodes (InventoryService=5 edges) | 0 |
+| `diagnose multigraph --graph $graph` | 25 edges, 0 collapsed, 12 producer suppression sites | 0 |
+| `check-update .\corpus` | no output (nothing pending) | 0 |
+| `export html --graph $graph --output .\export_test.html` | `graph.html written` | 0 |
+| `tree --graph $graph --output .\tree_test.html --root <abs-corpus-path>` | error: source_file paths are repo-relative | **1** |
+
+## 4. Generated Artifacts
+
+### 4.1 Code-only graph (`official-cli-smoke/graphify-out/`)
+
+- [graph.json](file:///D:/RESILIENT_INTELLIGENCE/graphify-runtime-recon/official-cli-smoke/graphify-out/graph.json): 14 nodes, 15 edges
+- `manifest.json`, `.graphify_root`, `cache/ast/v0.9.86-s8-g0fcafffe3c00/`
+
+### 4.2 Post-update graph (`official-cli-smoke/corpus/graphify-out/`)
+
+- [graph.json](file:///D:/RESILIENT_INTELLIGENCE/graphify-runtime-recon/official-cli-smoke/corpus/graphify-out/graph.json): **20 nodes, 25 edges, `directed: false`**
+- `input_tokens: 0, output_tokens: 0` (confirms no LLM was invoked)
+- `manifest.json` with 3 files, all `semantic_hash: ""`
+
+### 4.3 Export test
+
+- `export_test.html` — generated by `export html` (interactive graph.html).
+
+## 5. Observations
+
+### 5.1 Node schema
+
+Every node carries a stable set of fields:
+`id, label, file_type, source_file, source_location, _origin`.
+Code nodes add `_callable` / `_callable_class`. Doc nodes add `node_kind`
+(`page` or `heading`). External concept nodes add `type: external, external: true`.
+
+**Node ID scheme** (unchanged from 0.9.48): `<file>_<class>_<member>` for code;
+`<file>_<slugified-heading>` for doc headings; `<file>` for module/page roots.
+
+Node counts in post-update graph:
+
+| file_type | count |
+|---|---|
+| code | 8 (module, 2 classes, 4 methods, record_event fn) |
+| rationale | 5 (WHY-comments + docstrings) |
+| document | 6 (2 pages + 4 headings) |
+| concept (external) | 1 (dataclasses) |
+
+### 5.2 Edge schema
+
+Every edge carries: `source, target, relation, confidence, source_file,
+source_location, weight, _origin`. Some add `context` and `confidence_score`.
+
+Edge relations observed:
+
+| relation | confidence | count | meaning |
+|---|---|---|---|
+| `contains` | EXTRACTED | 8 | file→class, page→heading, heading→subheading |
+| `method` | EXTRACTED | 4 | class→method |
+| `imports_from` | EXTRACTED | 1 | module→stdlib |
+| `calls` | EXTRACTED | 1 | reserve→check_stock |
+| `references` | EXTRACTED | 1 | init→Warehouse (parameter type) |
+| `rationale_for` | EXTRACTED | 5 | comment/docstring→code entity |
+| **`references`** | **INFERRED (0.95)** | **6** | **doc heading → code entity mentioned in heading text** |
+
+**Key finding**: The 6 `references` edges with `confidence=INFERRED,
+confidence_score=0.95` are produced by the **`update` (no-LLM) path** when a
+markdown heading's text mentions a code symbol. Examples:
+
+```
+design_inventory_flow --references [INFERRED 0.95]--> warehouse_inventoryservice_reserve
+  (context: "InventoryService.reserve", source: design.md:L5)
+design_inventory_flow --references [INFERRED 0.95]--> warehouse_inventoryservice_check_stock
+design_inventory_flow --references [INFERRED 0.95]--> warehouse_warehouse_decrement
+design_audit_trail  --references [INFERRED 0.95]--> warehouse_record_event
+notes_open_questions --references [INFERRED 0.95]--> warehouse_record_event
+notes_open_questions --references [INFERRED 0.95]--> warehouse_warehouse_decrement
+```
+
+This is a **heuristic symbol-name match** (heading text contains a token that
+resolves to a code node id), not LLM semantic extraction. It bridges docs to
+code without an API key.
+
+### 5.3 Confidence semantics
+
+- `EXTRACTED` = derived deterministically from AST/source syntax (all code
+  edges, all `contains`, all `rationale_for`).
+- `INFERRED` (with `confidence_score`, e.g. 0.95) = heuristic projection. In
+  this graph, the only INFERRED edges are the doc→code `references` matches
+  and (in recon-002's baseline) one `uses` edge for a stored-then-called
+  field. No INFERRED edge in this experiment had `_origin` other than `ast`.
+- `AMBIGUOUS` — not observed.
+
+These describe **how the edge was produced**, not epistemic belief strength.
+
+### 5.4 Query / path / explain behavior
+
+- **`explain`** prints a node header (ID, source, type, degree) and lists up
+  to 20 connections by default (`--all` removes the cap). Direction is shown
+  as `-->` (outgoing) / `<--` (incoming) with relation, confidence, and
+  source location.
+- **`path`** is **directed by default** (the JSON `directed` flag is not
+  consulted). When no directed path exists it prints a hint and exits **0**
+  (not 4). `--undirected` ignores edge direction. Exit **4** only when a
+  named endpoint doesn't match any node.
+- **`query`** does BFS (or DFS with `--dfs`) from nodes whose label/id
+  matches the query token. `--context` filters edges by their `context`
+  field (e.g. `call`). `--budget N` caps output tokens (default 2000).
+  Output lists matched nodes and the traversal edges with confidence.
+- **`affected`** does **reverse traversal** (what points *to* X) over a
+  default relation set: `calls, indirect_call, references, imports,
+  imports_from, dynamic_import, re_exports, inherits, extends, implements,
+  uses, mixes_in, embeds, defines, requires`. `--relation R` narrows it
+  (repeatable). `--depth N` controls traversal depth (default 2).
+
+### 5.5 Exit codes (verified)
+
+| Code | Meaning | Verified via |
+|---|---|---|
+| 0 | answer / success | most commands |
+| 3 | ambiguous name (candidates listed) | **not triggered** in this corpus (no duplicate labels) |
+| 4 | no node matches | `explain DoesNotExist`, `path ... NoSuchNode` |
+| 1 | operational error | `tree --root <abs>` (repo-relative path mismatch) |
+
+### 5.6 `diagnose multigraph`
+
+Reports edge-collapse risk. For this graph: 25 raw edges, 0 exact duplicates,
+0 same-endpoint collapses, 12 `producer_suppression_sites` (line references
+to `seen_ids` / `seen_keys` / `seen_doc_refs` deduplication in the source).
+Useful for auditing whether parallel edges would be collapsed post-build.
+
+### 5.7 `check-update`
+
+Prints nothing and exits 0 when no semantic re-extraction is pending
+(all `semantic_hash` empty → nothing to re-run). Cron-safe per help.
+
+### 5.8 `export html`
+
+Writes a self-contained `graph.html` (no server needed). Works without an API
+key.
+
+### 5.9 `tree`
+
+Requires `--root` to match the **repo-relative** `source_file` paths stored
+in nodes (e.g. `design.md`, not an absolute path). Passing an absolute root
+exits 1 with a clear error.
+
+## 6. Notable Differences from Graphify 0.9.48 (prior recon)
+
+| Area | 0.9.48 | 0.9.86 |
+|---|---|---|
+| Doc→code linkage in `update` | 0 cross-document edges | **6 heuristic `references` INFERRED edges** from heading text to code nodes |
+| `references` edge type | present for parameter types | also used for doc→code symbol matches |
+| New top-level commands | — | `affected`, `god-nodes`, `diagnose`, `check-update`, `tree`, `merge-graphs`, `save-result`, `reflect`, `global`, `benchmark`, `provider`, `add`, `watch`, `install`/`uninstall` per IDE |
+| `path` flags | `--directed`/`--undirected` | same; `--directed` is the documented default |
+| `explain` flags | `--all` | same |
+| `query` flags | `--dfs`, `--context`, `--budget`, `--graph` | same |
+| Cache schema | `v0.9.48-s2` | `v0.9.86-s8-g0fcafffe3c00` |
+| `affected` default relation set | (command did not exist) | 16 relations listed in §5.4 |
+
+## 7. Limitations
+
+1. **No LLM semantic extraction was exercised.** All runs used `--code-only`
+   or `update` (no-LLM). The `extract --backend … --mode deep` path was not
+   tested because no API key was available and Ollama was not started (per
+   scope). Findings about doc→code `references` edges apply only to the
+   heuristic no-LLM path, not to `--mode deep`.
+2. **Small corpus.** 3 files, 20 nodes. Behavior on large graphs, clustering,
+   community labeling, and `.graphify_analysis.json` was not tested
+   (`--no-cluster` was used).
+3. **Exit code 3 (ambiguous) not triggered.** No two nodes share a label in
+   this corpus, so the ambiguous-name path was not directly observed.
+4. **`tree` failed** due to a `--root` path-format requirement; not retried
+   with a relative root.
+5. **`merge-graphs`, `global`, `save-result`, `reflect`, `provider`, `watch`,
+   `benchmark`, `prs`** were not exercised (out of scope for a smoke test).
+
+## 8. Recommended Next Experiment
+
+**Test the `extract --backend <B> --mode deep` semantic path** on this same
+corpus (or the richer semantic corpus from
+[GRAPHIFY_SEMANTIC_EXPERIMENT.md](file:///D:/RESILIENT_INTELLIGENCE/graphify-runtime-recon/GRAPHIFY_SEMANTIC_EXPERIMENT.md))
+once an LLM backend is available. Specifically verify:
+
+1. Whether `--mode deep` produces typed `evidence`/`claim`/`contradiction`
+   node kinds or richer `depends_on` / `supports` / `contradicts` relations
+   beyond the heuristic `references` edges observed here.
+2. Whether `affected` traversal over semantic edges correctly identifies
+   downstream beliefs when an evidence node changes.
+3. Whether `save-result` + `reflect` produce a usable lessons file and
+   whether `reflect --graph` correctly drops stale memory nodes.
+
+This would close the largest gap in the current recon: the boundary between
+Graphify's **structural** dependency graph (well-demonstrated here) and any
+**evidentiary** dependency graph it may produce under `--mode deep`.
