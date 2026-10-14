@@ -83,3 +83,4 @@ model_cache/
 !**/fixtures/**
 *.zip
 !archives/*.zip
+.aider*
